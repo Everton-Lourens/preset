@@ -29,7 +29,6 @@
     "plugins": [
       "expo-router",
       "./plugins/with-termux-queries.js",
-      "./plugins/with-cleartext-traffic.js",
       [
         "expo-splash-screen",
         {
