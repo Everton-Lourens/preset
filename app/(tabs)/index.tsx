@@ -40,6 +40,7 @@ import { useBackendRealtime } from '@/hooks/use-backend-realtime';
 
 const STATUS_POLL_NOTE = 'SSE ativo: logs e frames não usam polling.';
 const ASCII_HINT = 'Use apenas caracteres ASCII imprimíveis no SSID.';
+const verDesenvolvimento = false;
 
 function Chip({ label, tone }: { label: string; tone: 'good' | 'warn' | 'bad' | 'info' }) {
   return (
@@ -158,7 +159,6 @@ export default function HomeScreen() {
 
       const result = await probeBackendHealth(backendUrl, {
         timeoutMs: HEALTH_TIMEOUT_MS,
-        rounds: 3,
       });
 
       if (result.online) {
@@ -388,10 +388,10 @@ export default function HomeScreen() {
           ) : Platform.OS === 'android' ? (
             <Pressable style={styles.healthActionButton} onPress={openTermux}>
               <IconSymbol name="paperplane.fill" size={16} color="#fff" />
-              <Text style={styles.healthActionButtonText}>Iniciar</Text>
+              <Text style={styles.healthActionButtonText}>Iniciar Servidor</Text>
             </Pressable>
           ) : (
-            <Text style={styles.platformNote}>O botão Iniciar está disponível apenas no Android.</Text>
+            <Text style={styles.platformNote}>O botão Iniciar Servidor está disponível apenas no Android.</Text>
           )}
         </View>
       </View>
@@ -404,28 +404,115 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refreshAll()} />}
         keyboardShouldPersistTaps="handled">
-        <View style={styles.heroCard}>
-          <View style={styles.heroTopRow}>
-            <View style={styles.heroIcon}>
-              <IconSymbol name="slider.horizontal.3" size={22} color="#fff" />
+        {verDesenvolvimento ? (
+          <View style={styles.heroCard}>
+            <View style={styles.heroTopRow}>
+              <View style={styles.heroIcon}>
+                <IconSymbol name="slider.horizontal.3" size={22} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.heroKicker}>Painel de integração</Text>
+                <Text style={styles.heroTitle}>Frontend conectado ao backend</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.heroKicker}>Painel de integração</Text>
-              <Text style={styles.heroTitle}>Frontend conectado ao backend</Text>
+            <Text style={styles.heroText}>
+              O front escuta o backend em tempo real via SSE, atualiza logs, status e o preview do browser sem polling.
+            </Text>
+            <View style={styles.chipRow}>
+              <Chip label={healthState === 'online' ? 'Servidor online' : 'Servidor instável'} tone={healthTone} />
+              <Chip label={serviceRunning ? 'Serviço rodando' : 'Serviço parado'} tone={serviceRunning ? 'good' : 'warn'} />
+              <Chip label={browserViewActive ? 'Browser ativo' : 'Browser inativo'} tone={browserViewActive ? 'good' : 'info'} />
             </View>
           </View>
-          <Text style={styles.heroText}>
-            O front escuta o backend em tempo real via SSE, atualiza logs, status e o preview do browser sem polling.
-          </Text>
-          <View style={styles.chipRow}>
-            <Chip label={healthState === 'online' ? 'Servidor online' : 'Servidor instável'} tone={healthTone} />
-            <Chip label={serviceRunning ? 'Serviço rodando' : 'Serviço parado'} tone={serviceRunning ? 'good' : 'warn'} />
-            <Chip label={browserViewActive ? 'Browser ativo' : 'Browser inativo'} tone={browserViewActive ? 'good' : 'info'} />
+        ) : null}
+
+        <View style={styles.card}>
+          <SectionTitle icon="Gear" title="Preset Huawei" />
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Senha do roteador</Text>
+            <TextInput
+              value={routerPassword}
+              onChangeText={setRouterPassword}
+              placeholder="Senha do roteador"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
+          </View>
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Login PPPoE</Text>
+            <TextInput
+              value={emailPPPoEInput}
+              onChangeText={setEmailPPPoEInput}
+              placeholder="email@exemplo.com"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              style={styles.input}
+            />
+          </View>
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Senha PPPoE</Text>
+            <TextInput
+              value={passwordPPPoEInput}
+              onChangeText={setPasswordPPPoEInput}
+              placeholder="Senha PPPoE"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
+          </View>
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Nome do Wi-Fi</Text>
+            <TextInput
+              value={wifiName}
+              onChangeText={setWifiName}
+              placeholder="MinhaRede"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
+          </View>
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>Senha do Wi-Fi</Text>
+            <TextInput
+              value={wifiPassword}
+              onChangeText={setWifiPassword}
+              placeholder="Senha Wi-Fi"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
+          </View>
+
+          <View style={styles.buttonRow}>
+            <Pressable
+              style={[styles.primaryButton, (presetLoading || onuLoading) && styles.buttonDisabled]}
+              onPress={() => void sendPreset()}
+              disabled={presetLoading || onuLoading}>
+              {presetLoading ? <ActivityIndicator color="#fff" /> : <IconSymbol name="paperplane.fill" size={18} color="#fff" />}
+              <Text style={styles.primaryButtonText}>Preset Huawei</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.secondaryButton, (presetLoading || onuLoading) && styles.buttonDisabled]}
+              onPress={() => void sendUpdateOnu()}
+              disabled={presetLoading || onuLoading}>
+              {onuLoading ? <ActivityIndicator color="#fff" /> : <IconSymbol name="arrow.clockwise" size={18} color="#fff" />}
+              <Text style={styles.primaryButtonText}>Update ONU</Text>
+            </Pressable>
           </View>
         </View>
 
         <View style={styles.card}>
-          <SectionTitle icon="Cloud" title="Conexão" subtitle="URL e code ficam salvos localmente até expirar." />
+          <SectionTitle icon="Cloud" title="Conexão" />
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Backend URL</Text>
             <TextInput
@@ -453,178 +540,103 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <View style={styles.card}>
-          <SectionTitle icon="Gear" title="Preset Huawei" subtitle="Os campos são enviados para /api/preset." />
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Senha do roteador</Text>
-            <TextInput
-              value={routerPassword}
-              onChangeText={setRouterPassword}
-              placeholder="Senha do roteador"
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry={false}
-              textContentType="none"
-              autoComplete="off"
-              style={styles.input}
-            />
-          </View>
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Login PPPoE</Text>
-            <TextInput
-              value={emailPPPoEInput}
-              onChangeText={setEmailPPPoEInput}
-              placeholder="email@exemplo.com"
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              style={styles.input}
-            />
-          </View>
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Senha PPPoE</Text>
-            <TextInput
-              value={passwordPPPoEInput}
-              onChangeText={setPasswordPPPoEInput}
-              placeholder="Senha PPPoE"
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry={false}
-              textContentType="none"
-              autoComplete="off"
-              style={styles.input}
-            />
-          </View>
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Nome do Wi-Fi</Text>
-            <TextInput
-              value={wifiName}
-              onChangeText={setWifiName}
-              placeholder="MinhaRede"
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.input}
-            />
-          </View>
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Senha do Wi-Fi</Text>
-            <TextInput
-              value={wifiPassword}
-              onChangeText={setWifiPassword}
-              placeholder="Senha Wi-Fi"
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry={false}
-              textContentType="none"
-              autoComplete="off"
-              style={styles.input}
-            />
-          </View>
+        {verDesenvolvimento ? (
+          <>
+            <View style={styles.card}>
+              <SectionTitle icon="Check" title="Status do serviço" subtitle="Sem polling: o SSE atualiza o estado em tempo real." />
+              <View style={styles.statusGrid}>
+                <View style={styles.statusBox}>
+                  <Text style={styles.statusLabel}>Serviço</Text>
+                  <Text style={styles.statusValue}>{status?.service || '—'}</Text>
+                </View>
+                <View style={styles.statusBox}>
+                  <Text style={styles.statusLabel}>Preset</Text>
+                  <Text style={styles.statusValue}>{presetRunning ? 'Em execução' : 'Parado'}</Text>
+                </View>
+                <View style={styles.statusBox}>
+                  <Text style={styles.statusLabel}>ONU</Text>
+                  <Text style={styles.statusValue}>{onuRunning ? 'Em execução' : 'Parado'}</Text>
+                </View>
+                <View style={styles.statusBox}>
+                  <Text style={styles.statusLabel}>Browser</Text>
+                  <Text style={styles.statusValue}>{browserViewActive ? 'Ativo' : 'Inativo'}</Text>
+                </View>
+              </View>
 
-          <View style={styles.buttonRow}>
-            <Pressable style={[styles.primaryButton, (presetLoading || onuLoading) && styles.buttonDisabled]} onPress={() => void sendPreset()} disabled={presetLoading || onuLoading}>
-              {presetLoading ? <ActivityIndicator color="#fff" /> : <IconSymbol name="paperplane.fill" size={18} color="#fff" />}
-              <Text style={styles.primaryButtonText}>Preset Huawei</Text>
-            </Pressable>
-            <Pressable style={[styles.secondaryButton, (presetLoading || onuLoading) && styles.buttonDisabled]} onPress={() => void sendUpdateOnu()} disabled={presetLoading || onuLoading}>
-              {onuLoading ? <ActivityIndicator color="#fff" /> : <IconSymbol name="arrow.clockwise" size={18} color="#fff" />}
-              <Text style={styles.primaryButtonText}>Update ONU</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <SectionTitle icon="Check" title="Status do serviço" subtitle="Sem polling: o SSE atualiza o estado em tempo real." />
-          <View style={styles.statusGrid}>
-            <View style={styles.statusBox}>
-              <Text style={styles.statusLabel}>Serviço</Text>
-              <Text style={styles.statusValue}>{status?.service || '—'}</Text>
+              <View style={styles.statusDetail}>
+                <Text style={styles.detailLabel}>Mensagem</Text>
+                <Text style={styles.detailValue}>
+                  {status?.state?.message || status?.browserView?.label || healthMessage || STATUS_POLL_NOTE}
+                </Text>
+              </View>
+              <View style={styles.statusDetail}>
+                <Text style={styles.detailLabel}>Run ID</Text>
+                <Text style={styles.detailValue}>{status?.state?.runId || status?.onuState?.runId || browserSession?.runId || '—'}</Text>
+              </View>
+              <View style={styles.statusDetail}>
+                <Text style={styles.detailLabel}>Início</Text>
+                <Text style={styles.detailValue}>{formatDateTime(status?.state?.startedAt || status?.onuState?.startedAt || browserSession?.startedAt)}</Text>
+              </View>
+              <View style={styles.statusDetail}>
+                <Text style={styles.detailLabel}>Finalização</Text>
+                <Text style={styles.detailValue}>{formatDateTime(status?.state?.finishedAt || status?.onuState?.finishedAt || browserSession?.finishedAt)}</Text>
+              </View>
             </View>
-            <View style={styles.statusBox}>
-              <Text style={styles.statusLabel}>Preset</Text>
-              <Text style={styles.statusValue}>{presetRunning ? 'Em execução' : 'Parado'}</Text>
+
+            <View style={styles.card}>
+              <SectionTitle
+                icon="Warning"
+                title="Browser ao vivo"
+                subtitle="browser-session atualiza o painel e browser-frame troca a imagem."
+              />
+              <BrowserPreview
+                browserFrame={browserFrame}
+                browserSession={browserSession}
+                browserStatusLabel={browserStatusLabel}
+                currentStep={currentBrowserStep}
+              />
             </View>
-            <View style={styles.statusBox}>
-              <Text style={styles.statusLabel}>ONU</Text>
-              <Text style={styles.statusValue}>{onuRunning ? 'Em execução' : 'Parado'}</Text>
+
+            <View style={styles.card}>
+              <View style={styles.consoleHeaderRow}>
+                <SectionTitle
+                  icon="Warning"
+                  title="Console ao vivo"
+                  subtitle="Cada evento log é empilhado no momento em que chega."
+                />
+                <Pressable style={styles.consoleToggle} onPress={() => setConsoleVisible((value) => !value)}>
+                  <Text style={styles.consoleToggleText}>{consoleVisible ? 'Ocultar' : 'Mostrar'}</Text>
+                </Pressable>
+              </View>
+              {consoleVisible ? <LiveConsole logs={logs} connectionState={streamState.statusStream} /> : null}
             </View>
-            <View style={styles.statusBox}>
-              <Text style={styles.statusLabel}>Browser</Text>
-              <Text style={styles.statusValue}>{browserViewActive ? 'Ativo' : 'Inativo'}</Text>
+
+            <View style={styles.card}>
+              <SectionTitle
+                icon="Warning"
+                title="Reconexão e sincronização"
+                subtitle="Ao cair, os streams reabrem e o status é sincronizado de novo."
+              />
+              <Text style={styles.detailValue}>
+                Estado SSE: status={streamState.statusStream}, browser={streamState.browserStream}
+              </Text>
+              <Text style={styles.detailValue}>Última sincronização: {formatDateTime(streamState.lastSyncedAt)}</Text>
+              <Text style={styles.detailValue}>Último erro: {streamState.lastError || '—'}</Text>
+              <Pressable style={styles.retryButton} onPress={() => reconnectNow()}>
+                <Text style={styles.retryButtonText}>Forçar reconexão</Text>
+              </Pressable>
             </View>
-          </View>
 
-          <View style={styles.statusDetail}>
-            <Text style={styles.detailLabel}>Mensagem</Text>
-            <Text style={styles.detailValue}>{status?.state?.message || status?.browserView?.label || healthMessage || STATUS_POLL_NOTE}</Text>
-          </View>
-          <View style={styles.statusDetail}>
-            <Text style={styles.detailLabel}>Run ID</Text>
-            <Text style={styles.detailValue}>{status?.state?.runId || status?.onuState?.runId || browserSession?.runId || '—'}</Text>
-          </View>
-          <View style={styles.statusDetail}>
-            <Text style={styles.detailLabel}>Início</Text>
-            <Text style={styles.detailValue}>{formatDateTime(status?.state?.startedAt || status?.onuState?.startedAt || browserSession?.startedAt)}</Text>
-          </View>
-          <View style={styles.statusDetail}>
-            <Text style={styles.detailLabel}>Finalização</Text>
-            <Text style={styles.detailValue}>{formatDateTime(status?.state?.finishedAt || status?.onuState?.finishedAt || browserSession?.finishedAt)}</Text>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <SectionTitle
-            icon="Warning"
-            title="Browser ao vivo"
-            subtitle="browser-session atualiza o painel e browser-frame troca a imagem."
-          />
-          <BrowserPreview
-            browserFrame={browserFrame}
-            browserSession={browserSession}
-            browserStatusLabel={browserStatusLabel}
-            currentStep={currentBrowserStep}
-          />
-        </View>
-
-        <View style={styles.card}>
-          <View style={styles.consoleHeaderRow}>
-            <SectionTitle
-              icon="Warning"
-              title="Console ao vivo"
-              subtitle="Cada evento log é empilhado no momento em que chega."
-            />
-            <Pressable style={styles.consoleToggle} onPress={() => setConsoleVisible((value) => !value)}>
-              <Text style={styles.consoleToggleText}>{consoleVisible ? 'Ocultar' : 'Mostrar'}</Text>
-            </Pressable>
-          </View>
-          {consoleVisible ? <LiveConsole logs={logs} connectionState={streamState.statusStream} /> : null}
-        </View>
-
-        <View style={styles.card}>
-          <SectionTitle icon="Warning" title="Reconexão e sincronização" subtitle="Ao cair, os streams reabrem e o status é sincronizado de novo." />
-          <Text style={styles.detailValue}>
-            Estado SSE: status={streamState.statusStream}, browser={streamState.browserStream}
-          </Text>
-          <Text style={styles.detailValue}>Última sincronização: {formatDateTime(streamState.lastSyncedAt)}</Text>
-          <Text style={styles.detailValue}>Último erro: {streamState.lastError || '—'}</Text>
-          <Pressable style={styles.retryButton} onPress={() => reconnectNow()}>
-            <Text style={styles.retryButtonText}>Forçar reconexão</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.card}>
-          <SectionTitle icon="Warning" title="Resposta recente" subtitle="Mostra o último retorno útil do backend." />
-          <Text style={styles.consoleText}>{lastAction || healthMessage || 'Nenhuma resposta ainda.'}</Text>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Health: {healthState}</Text>
-            <Text style={styles.metaText}>Code: {accessCode.trim() ? 'informado' : 'vazio'}</Text>
-          </View>
-        </View>
+            <View style={styles.card}>
+              <SectionTitle icon="Warning" title="Resposta recente" subtitle="Mostra o último retorno útil do backend." />
+              <Text style={styles.consoleText}>{lastAction || healthMessage || 'Nenhuma resposta ainda.'}</Text>
+              <View style={styles.metaRow}>
+                <Text style={styles.metaText}>Health: {healthState}</Text>
+                <Text style={styles.metaText}>Code: {accessCode.trim() ? 'informado' : 'vazio'}</Text>
+              </View>
+            </View>
+          </>
+        ) : null}
 
         <View style={styles.footerSpace} />
       </ScrollView>

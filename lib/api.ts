@@ -110,68 +110,7 @@ export type HealthProbeResult =
       attempts: HealthProbeAttempt[];
     };
 
-const HEALTH_BASE_PATHS = ['/health', '/api/status', '/', '/api/health'];
-const HEALTH_METHODS: HealthProbeMethod[] = ['GET', 'HEAD'];
-const LOCAL_BACKEND_VARIANTS = ['127.0.0.1', 'localhost', '10.0.2.2'];
-
-function uniqueStrings(values: string[]) {
-  return [...new Set(values.filter(Boolean))];
-}
-
-function isLoopbackHost(hostname: string) {
-  const lowered = hostname.toLowerCase();
-  return lowered === 'localhost' || lowered === '127.0.0.1' || lowered === '::1';
-}
-
-function getBackendPort(baseUrl: string) {
-  try {
-    const parsed = new URL(normalizeBackendUrl(baseUrl));
-    return parsed.port ? `:${parsed.port}` : '';
-  } catch {
-    return ':7777';
-  }
-}
-
-function buildHealthBases(baseUrl: string) {
-  const normalized = normalizeBackendUrl(baseUrl);
-  const fallbacks = new Set<string>([normalized]);
-
-  try {
-    const parsed = new URL(normalized);
-    const port = parsed.port ? `:${parsed.port}` : '';
-    const protocol = parsed.protocol || 'http:';
-    const hostname = parsed.hostname;
-
-    if (isLoopbackHost(hostname)) {
-      for (const host of LOCAL_BACKEND_VARIANTS) {
-        fallbacks.add(`${protocol}//${host}${port}`);
-      }
-    }
-  } catch {
-    const port = getBackendPort(normalized);
-    for (const host of LOCAL_BACKEND_VARIANTS) {
-      fallbacks.add(`http://${host}${port}`);
-    }
-  }
-
-  return uniqueStrings([...fallbacks]);
-}
-
-function buildHealthCandidates(baseUrl: string) {
-  const bases = buildHealthBases(baseUrl);
-  const candidates: Array<{ baseUrl: string; path: string; method: HealthProbeMethod }> = [];
-
-  for (const base of bases) {
-    for (const path of HEALTH_BASE_PATHS) {
-      for (const method of HEALTH_METHODS) {
-        candidates.push({ baseUrl: base, path, method });
-      }
-    }
-  }
-
-  return candidates;
-}
-
+const HEALTH_PATH = '/health';
 function normalizeFetchError(error: unknown) {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -184,154 +123,145 @@ function normalizeFetchError(error: unknown) {
   return 'Falha de conexão.';
 }
 
-function makeAttempt(candidate: { baseUrl: string; path: string; method: HealthProbeMethod }) {
+function makeAttempt(url: string, baseUrl: string, path: string, method: HealthProbeMethod, startedAt: number, extra?: Partial<HealthProbeAttempt>): HealthProbeAttempt {
   return {
-    ...candidate,
-    url: buildUrl(candidate.baseUrl, candidate.path).toString(),
+    url,
+    baseUrl,
+    path,
+    method,
+    elapsedMs: Date.now() - startedAt,
+    outcome: extra?.outcome ?? 'response',
+    status: extra?.status,
+    error: extra?.error,
   };
 }
 
 function summarizeFailures(attempts: HealthProbeAttempt[]) {
-  const topFailures = attempts.slice(0, 4).map((attempt) => {
+  const topFailures = attempts.slice(0, 2).map((attempt) => {
     const statusPart = typeof attempt.status === 'number' ? `HTTP ${attempt.status}` : attempt.outcome;
-    return `${attempt.method} ${attempt.baseUrl}${attempt.path} → ${statusPart}${attempt.error ? ` (${attempt.error})` : ''}`;
+    return `${attempt.method} ${attempt.url} → ${statusPart}${attempt.error ? ` (${attempt.error})` : ''}`;
   });
 
   if (!topFailures.length) {
     return 'Não foi possível confirmar o servidor ativo.';
   }
 
-  const suffix = attempts.length > topFailures.length ? ` (+${attempts.length - topFailures.length} outras tentativas)` : '';
-  return `Não houve resposta válida após ${attempts.length} tentativas. ${topFailures.join(' | ')}${suffix}`;
+  return `Não houve resposta válida após ${attempts.length} tentativas. ${topFailures.join(' | ')}`;
 }
 
-export async function probeBackendHealth(baseUrl: string, options?: { timeoutMs?: number; rounds?: number }) {
+async function fetchWithTimeout(url: string, method: HealthProbeMethod, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      method,
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+    return { response, aborted: false as const };
+  } catch (error) {
+    const aborted = controller.signal.aborted;
+    return {
+      response: null,
+      aborted,
+      error,
+    } as const;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function probeBackendHealth(baseUrl: string, options?: { timeoutMs?: number }) {
   const timeoutMs = options?.timeoutMs ?? HEALTH_TIMEOUT_MS;
-  const rounds = Math.max(1, options?.rounds ?? 3);
-  const allAttempts: HealthProbeAttempt[] = [];
+  const normalizedBaseUrl = normalizeBackendUrl(baseUrl);
+  const attempts: HealthProbeAttempt[] = [];
 
-  for (let round = 1; round <= rounds; round += 1) {
-    const candidates = buildHealthCandidates(baseUrl);
-    const controllers = candidates.map(() => new AbortController());
+  const healthUrl = buildUrl(normalizedBaseUrl, HEALTH_PATH).toString();
+  console.info(`[health] checking ${healthUrl} (timeout ${timeoutMs}ms)`);
 
-    const roundResult = await new Promise<{ online: true; successfulAttempt: HealthProbeAttempt; attempts: HealthProbeAttempt[] } | null>(
-      (resolve) => {
-        let settled = false;
-        let completedCount = 0;
+  const startedHealth = Date.now();
+  const healthResult = await fetchWithTimeout(healthUrl, 'HEAD', timeoutMs);
 
-        const markCompleted = (attempt: HealthProbeAttempt) => {
-          allAttempts.push(attempt);
-          completedCount += 1;
-          if (!settled && completedCount >= candidates.length) {
-            settled = true;
-            resolve(null);
-          }
-        };
-
-        candidates.forEach((candidate, index) => {
-          const { baseUrl: candidateBaseUrl, path, method } = candidate;
-          const url = makeAttempt(candidate);
-          const controller = controllers[index];
-          const startedAt = Date.now();
-
-          console.info(
-            `[health] round ${round}/${rounds} ${method} ${url.url} (timeout ${timeoutMs}ms)`
-          );
-
-          const timer = setTimeout(() => {
-            controller.abort();
-          }, timeoutMs);
-
-          fetch(url.url, {
-            method,
-            signal: controller.signal,
-            headers: { Accept: 'application/json' },
-            cache: 'no-store',
-          })
-            .then((response) => {
-              const attempt: HealthProbeAttempt = {
-                url: url.url,
-                baseUrl: candidateBaseUrl,
-                path,
-                method,
-                elapsedMs: Date.now() - startedAt,
-                status: response.status,
-                outcome: 'response',
-              };
-
-              if (settled) {
-                console.info(
-                  `[health] ignored late response ${method} ${url.url} HTTP ${response.status} in ${attempt.elapsedMs}ms`
-                );
-                return;
-              }
-
-              settled = true;
-              controllers.forEach((otherController, otherIndex) => {
-                if (otherIndex !== index) {
-                  otherController.abort();
-                }
-              });
-
-              clearTimeout(timer);
-              allAttempts.push(attempt);
-
-              console.info(
-                `[health] online via ${method} ${url.url} HTTP ${response.status} in ${attempt.elapsedMs}ms`
-              );
-              resolve({ online: true, successfulAttempt: attempt, attempts: [...allAttempts] });
-            })
-            .catch((error) => {
-              const elapsedMs = Date.now() - startedAt;
-              const aborted = controller.signal.aborted;
-              const attempt: HealthProbeAttempt = {
-                url: url.url,
-                baseUrl: candidateBaseUrl,
-                path,
-                method,
-                elapsedMs,
-                outcome: aborted ? 'timeout' : 'network-error',
-                error: aborted ? 'tempo esgotado' : normalizeFetchError(error),
-              };
-
-              clearTimeout(timer);
-
-              if (settled) {
-                console.info(
-                  `[health] ignored late failure ${method} ${url.url} after ${elapsedMs}ms: ${attempt.error}`
-                );
-                return;
-              }
-
-              console.warn(
-                `[health] failure ${method} ${url.url} after ${elapsedMs}ms: ${attempt.error}`
-              );
-              markCompleted(attempt);
-            });
-        });
-      }
+  if (healthResult.response) {
+    const attempt = makeAttempt(
+      healthUrl,
+      normalizedBaseUrl,
+      HEALTH_PATH,
+      'HEAD',
+      startedHealth,
+      { status: healthResult.response.status, outcome: 'response' }
     );
+    attempts.push(attempt);
 
-    if (roundResult) {
-      return {
-        online: true as const,
-        successfulAttempt: roundResult.successfulAttempt,
-        attempts: roundResult.attempts,
-        message: `Servidor ativo em ${roundResult.successfulAttempt.method} ${roundResult.successfulAttempt.url} (${roundResult.successfulAttempt.status} em ${roundResult.successfulAttempt.elapsedMs}ms).`,
-      };
-    }
-
-    if (round < rounds) {
-      await new Promise((resolve) => setTimeout(resolve, 250 * round));
-    }
+    return {
+      online: true as const,
+      successfulAttempt: attempt,
+      attempts,
+      message: `Servidor ativo em ${attempt.method} ${attempt.url} (${attempt.status} em ${attempt.elapsedMs}ms).`,
+    };
   }
 
-  const message = summarizeFailures(allAttempts);
-  console.warn(`[health] offline after ${allAttempts.length} attempts: ${message}`);
+  const healthAttempt = makeAttempt(
+    healthUrl,
+    normalizedBaseUrl,
+    HEALTH_PATH,
+    'HEAD',
+    startedHealth,
+    {
+      outcome: healthResult.aborted ? 'timeout' : 'network-error',
+      error: healthResult.aborted ? 'tempo esgotado' : normalizeFetchError(healthResult.error),
+    }
+  );
+  attempts.push(healthAttempt);
+
+  console.warn(`[health] health endpoint failed ${healthAttempt.method} ${healthAttempt.url}: ${healthAttempt.error}`);
+
+  const mainUrl = normalizeBackendUrl(baseUrl);
+  console.info(`[health] fallback checking ${mainUrl} (timeout ${timeoutMs}ms)`);
+
+  const startedMain = Date.now();
+  const mainResult = await fetchWithTimeout(mainUrl, 'GET', timeoutMs);
+
+  if (mainResult.response) {
+    const attempt = makeAttempt(
+      mainUrl,
+      normalizedBaseUrl,
+      '/',
+      'GET',
+      startedMain,
+      { status: mainResult.response.status, outcome: 'response' }
+    );
+    attempts.push(attempt);
+
+    return {
+      online: true as const,
+      successfulAttempt: attempt,
+      attempts,
+      message: `Servidor ativo em ${attempt.method} ${attempt.url} (${attempt.status} em ${attempt.elapsedMs}ms).`,
+    };
+  }
+
+  const mainAttempt = makeAttempt(
+    mainUrl,
+    normalizedBaseUrl,
+    '/',
+    'GET',
+    startedMain,
+    {
+      outcome: mainResult.aborted ? 'timeout' : 'network-error',
+      error: mainResult.aborted ? 'tempo esgotado' : normalizeFetchError(mainResult.error),
+    }
+  );
+  attempts.push(mainAttempt);
+
+  const message = summarizeFailures(attempts);
+  console.warn(`[health] offline after ${attempts.length} attempts: ${message}`);
 
   return {
     online: false as const,
-    attempts: allAttempts,
+    attempts,
     message,
   };
 }
